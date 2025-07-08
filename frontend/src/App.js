@@ -1,0 +1,280 @@
+import React, { useState } from 'react';
+import './App.css';
+
+function App() {
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [columns, setColumns] = useState([]);
+  const [summary, setSummary] = useState([]);
+  const [playingAudio, setPlayingAudio] = useState(null);
+  const [downloadingAAF, setDownloadingAAF] = useState(false);
+  const [downloadingWAVs, setDownloadingWAVs] = useState(false);
+
+  const handleFileChange = (event) => {
+    setSelectedFile(event.target.files[0]);
+    setUploadStatus('');
+    setColumns([]);
+    setSummary([]);
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!selectedFile) return;
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    setUploadStatus('Uploading...');
+    setSummary([]);
+    try {
+      const response = await fetch('http://localhost:8000/upload-csv/', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      setUploadStatus(data.message);
+      setColumns(data.columns || []);
+      setSummary(data.summary || []);
+    } catch (error) {
+      setUploadStatus('Upload failed.');
+    }
+  };
+
+  const playAudio = (audioBase64, lineIndex, altIndex) => {
+    if (playingAudio) {
+      playingAudio.pause();
+      playingAudio.currentTime = 0;
+    }
+    const audioData = atob(audioBase64);
+    const arrayBuffer = new ArrayBuffer(audioData.length);
+    const view = new Uint8Array(arrayBuffer);
+    for (let i = 0; i < audioData.length; i++) {
+      view[i] = audioData.charCodeAt(i);
+    }
+    const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(audioUrl);
+    audio.onended = () => {
+      setPlayingAudio(null);
+      URL.revokeObjectURL(audioUrl);
+    };
+    audio.play();
+    setPlayingAudio(audio);
+  };
+
+  const stopAudio = () => {
+    if (playingAudio) {
+      playingAudio.pause();
+      playingAudio.currentTime = 0;
+      setPlayingAudio(null);
+    }
+  };
+
+  const handleDownloadAAF = async () => {
+    setDownloadingAAF(true);
+    try {
+      const response = await fetch('http://localhost:8000/generate-aaf/', {
+        method: 'GET',
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('AAF generation failed:', errorText);
+        setDownloadingAAF(false);
+        alert(`Failed to generate AAF file: ${response.status} ${response.statusText}`);
+        return;
+      }
+      
+      // Check if response is JSON (error) or binary (success)
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const errorData = await response.json();
+        console.error('AAF generation error:', errorData);
+        setDownloadingAAF(false);
+        alert(`Failed to generate AAF file: ${errorData.error || 'Unknown error'}`);
+        return;
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'output.aaf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download error:', error);
+      alert(`Failed to download AAF file: ${error.message}`);
+    }
+    setDownloadingAAF(false);
+  };
+
+  const handleDownloadWAVs = async () => {
+    setDownloadingWAVs(true);
+    try {
+      const response = await fetch('http://localhost:8000/download-wavs/', {
+        method: 'GET',
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('WAV download failed:', errorText);
+        setDownloadingWAVs(false);
+        alert(`Failed to download WAV files: ${response.status} ${response.statusText}`);
+        return;
+      }
+      
+      // Check if response is JSON (error) or binary (success)
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const errorData = await response.json();
+        console.error('WAV download error:', errorData);
+        setDownloadingWAVs(false);
+        alert(`Failed to download WAV files: ${errorData.error || 'Unknown error'}`);
+        return;
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'audio_files.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download error:', error);
+      alert(`Failed to download WAV files: ${error.message}`);
+    }
+    setDownloadingWAVs(false);
+  };
+
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>AAF Generator MVP</h1>
+        <form onSubmit={handleSubmit}>
+          <input type="file" accept=".csv" onChange={handleFileChange} />
+          {selectedFile && <p>Selected file: {selectedFile.name}</p>}
+          <button type="submit" disabled={!selectedFile}>Upload CSV</button>
+        </form>
+        {uploadStatus && <p>{uploadStatus}</p>}
+        {columns.length > 0 && (
+          <div>
+            <strong>CSV Columns:</strong>
+            <ul>
+              {columns.map((col) => (
+                <li key={col}>{col}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {summary.length > 0 && (
+          <div style={{ maxHeight: '400px', overflowY: 'auto', width: '100%' }}>
+            <h2>Audio Generation Summary</h2>
+            <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+              <thead>
+                <tr>
+                  <th style={{ border: '1px solid #ccc', padding: '4px' }}>#</th>
+                  <th style={{ border: '1px solid #ccc', padding: '4px' }}>Start Time</th>
+                  <th style={{ border: '1px solid #ccc', padding: '4px' }}>End Time</th>
+                  <th style={{ border: '1px solid #ccc', padding: '4px' }}>Voice ID</th>
+                  <th style={{ border: '1px solid #ccc', padding: '4px' }}>Translation</th>
+                  <th style={{ border: '1px solid #ccc', padding: '4px' }}># Alternatives</th>
+                  <th style={{ border: '1px solid #ccc', padding: '4px' }}>Audio Playback</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.map((line, idx) => (
+                  <tr key={idx}>
+                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>{idx + 1}</td>
+                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.start_time}</td>
+                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.end_time}</td>
+                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.voice_id}</td>
+                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.text}</td>
+                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.num_audio_alternatives}</td>
+                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>
+                      {line.audio_alternatives && line.audio_alternatives.map((audioBase64, altIdx) => (
+                        <button
+                          key={altIdx}
+                          onClick={() => playAudio(audioBase64, idx, altIdx)}
+                          style={{
+                            margin: '2px',
+                            padding: '4px 8px',
+                            fontSize: '12px',
+                            backgroundColor: '#007bff',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '3px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Play Alt {altIdx + 1}
+                        </button>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {playingAudio && (
+              <div style={{ marginTop: '10px' }}>
+                <button 
+                  onClick={stopAudio}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '3px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Stop Audio
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {/* Download Buttons at the bottom */}
+        <div style={{ marginTop: '32px', display: 'flex', gap: '16px', justifyContent: 'center' }}>
+          <button
+            onClick={handleDownloadWAVs}
+            disabled={downloadingWAVs || summary.length === 0}
+            style={{
+              padding: '12px 24px',
+              fontSize: '16px',
+              backgroundColor: '#17a2b8',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: (downloadingWAVs || summary.length === 0) ? 'not-allowed' : 'pointer',
+              opacity: (downloadingWAVs || summary.length === 0) ? 0.7 : 1
+            }}
+          >
+            {downloadingWAVs ? 'Creating ZIP...' : 'Download WAV Files (ZIP)'}
+          </button>
+          <button
+            onClick={handleDownloadAAF}
+            disabled={downloadingAAF || summary.length === 0}
+            style={{
+              padding: '12px 24px',
+              fontSize: '16px',
+              backgroundColor: '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: (downloadingAAF || summary.length === 0) ? 'not-allowed' : 'pointer',
+              opacity: (downloadingAAF || summary.length === 0) ? 0.7 : 1
+            }}
+          >
+            {downloadingAAF ? 'Generating AAF...' : 'Download AAF'}
+          </button>
+        </div>
+      </header>
+    </div>
+  );
+}
+
+export default App;
