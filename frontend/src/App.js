@@ -15,6 +15,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('eleven_multilingual_v2');
   const [availableModels, setAvailableModels] = useState([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [apiKey, setApiKey] = useState('');
 
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
@@ -43,9 +44,10 @@ function App() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!selectedFile) return;
+    if (!selectedFile || !apiKey) return;
     const formData = new FormData();
     formData.append('file', selectedFile);
+    formData.append('api_key', apiKey);
     setUploadStatus('Uploading...');
     setSummary([]);
     try {
@@ -211,7 +213,25 @@ function App() {
             <input type="file" accept=".csv" onChange={handleFileChange} />
             {selectedFile && <p>Selected file: {selectedFile.name}</p>}
           </div>
-          <button type="submit" disabled={!selectedFile || loadingModels}>
+          <div style={{ marginBottom: '16px' }}>
+            <label htmlFor="api-key" style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              ElevenLabs API Key:
+            </label>
+            <input
+              type="password"
+              id="api-key"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              style={{
+                padding: '8px',
+                fontSize: '14px',
+                borderRadius: '4px',
+                border: '1px solid #ccc',
+                width: '300px'
+              }}
+            />
+          </div>
+          <button type="submit" disabled={!selectedFile || loadingModels || !apiKey}>
             Upload CSV
           </button>
         </form>
