@@ -4,6 +4,10 @@ import './App.css';
 // Get API URL from environment variable or default to localhost
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
+// Log the API URL for debugging (remove this in production)
+console.log('API_BASE_URL:', API_BASE_URL);
+console.log('REACT_APP_API_URL env var:', process.env.REACT_APP_API_URL);
+
 function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -206,6 +210,11 @@ function App() {
           {backendStatus === 'error' && (
             <div style={{ fontSize: '12px', marginTop: '4px' }}>
               API URL: {API_BASE_URL}
+              {!process.env.REACT_APP_API_URL && (
+                <div style={{ color: '#dc3545', marginTop: '4px' }}>
+                  ⚠️ REACT_APP_API_URL environment variable not set!
+                </div>
+              )}
             </div>
           )}
         </div>
