@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import './App.css';
 
+// Get API URL from environment variable or default to localhost
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
 function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -12,6 +15,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('eleven_multilingual_v2');
   const [availableModels, setAvailableModels] = useState([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [backendStatus, setBackendStatus] = useState('checking');
 
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
@@ -24,12 +28,20 @@ function App() {
   React.useEffect(() => {
     const loadModels = async () => {
       setLoadingModels(true);
+      setBackendStatus('checking');
       try {
-        const response = await fetch('http://localhost:8000/models/');
-        const data = await response.json();
-        setAvailableModels(data.models || []);
+        const response = await fetch(`${API_BASE_URL}/models/`);
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableModels(data.models || []);
+          setBackendStatus('connected');
+        } else {
+          setBackendStatus('error');
+          console.error('Backend responded with error:', response.status);
+        }
       } catch (error) {
-        console.error('Failed to load models:', error);
+        setBackendStatus('error');
+        console.error('Failed to connect to backend:', error);
       }
       setLoadingModels(false);
     };
@@ -44,7 +56,7 @@ function App() {
     setUploadStatus('Uploading...');
     setSummary([]);
     try {
-      const response = await fetch(`http://localhost:8000/upload-csv/?model_id=${selectedModel}`, {
+      const response = await fetch(`${API_BASE_URL}/upload-csv/?model_id=${selectedModel}`, {
         method: 'POST',
         body: formData,
       });
@@ -90,7 +102,7 @@ function App() {
   const handleDownloadAAF = async () => {
     setDownloadingAAF(true);
     try {
-      const response = await fetch('http://localhost:8000/generate-aaf/', {
+      const response = await fetch(`${API_BASE_URL}/generate-aaf/`, {
         method: 'GET',
       });
       
@@ -131,7 +143,7 @@ function App() {
   const handleDownloadWAVs = async () => {
     setDownloadingWAVs(true);
     try {
-      const response = await fetch('http://localhost:8000/download-wavs/', {
+      const response = await fetch(`${API_BASE_URL}/download-wavs/`, {
         method: 'GET',
       });
       
@@ -173,6 +185,30 @@ function App() {
     <div className="App">
       <header className="App-header">
         <h1>AAF Generator MVP</h1>
+        
+        {/* Backend Connection Status */}
+        <div style={{ 
+          marginBottom: '16px', 
+          padding: '8px', 
+          borderRadius: '4px',
+          backgroundColor: backendStatus === 'connected' ? '#d4edda' : 
+                         backendStatus === 'error' ? '#f8d7da' : '#fff3cd',
+          color: backendStatus === 'connected' ? '#155724' : 
+                backendStatus === 'error' ? '#721c24' : '#856404',
+          border: `1px solid ${backendStatus === 'connected' ? '#c3e6cb' : 
+                              backendStatus === 'error' ? '#f5c6cb' : '#ffeaa7'}`
+        }}>
+          <strong>Backend Status:</strong> {
+            backendStatus === 'connected' ? '✅ Connected' :
+            backendStatus === 'error' ? '❌ Connection Failed' :
+            '⏳ Checking...'
+          }
+          {backendStatus === 'error' && (
+            <div style={{ fontSize: '12px', marginTop: '4px' }}>
+              API URL: {API_BASE_URL}
+            </div>
+          )}
+        </div>
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '16px' }}>
             <label htmlFor="model-select" style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
