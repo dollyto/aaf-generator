@@ -9,6 +9,9 @@ function App() {
   const [playingAudio, setPlayingAudio] = useState(null);
   const [downloadingAAF, setDownloadingAAF] = useState(false);
   const [downloadingWAVs, setDownloadingWAVs] = useState(false);
+  const [selectedModel, setSelectedModel] = useState('eleven_multilingual_v2');
+  const [availableModels, setAvailableModels] = useState([]);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
@@ -16,6 +19,22 @@ function App() {
     setColumns([]);
     setSummary([]);
   };
+
+  // Load available models on component mount
+  React.useEffect(() => {
+    const loadModels = async () => {
+      setLoadingModels(true);
+      try {
+        const response = await fetch('http://localhost:8000/models/');
+        const data = await response.json();
+        setAvailableModels(data.models || []);
+      } catch (error) {
+        console.error('Failed to load models:', error);
+      }
+      setLoadingModels(false);
+    };
+    loadModels();
+  }, []);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -25,7 +44,7 @@ function App() {
     setUploadStatus('Uploading...');
     setSummary([]);
     try {
-      const response = await fetch('http://localhost:8000/upload-csv/', {
+      const response = await fetch(`http://localhost:8000/upload-csv/?model_id=${selectedModel}`, {
         method: 'POST',
         body: formData,
       });
@@ -155,9 +174,41 @@ function App() {
       <header className="App-header">
         <h1>AAF Generator MVP</h1>
         <form onSubmit={handleSubmit}>
-          <input type="file" accept=".csv" onChange={handleFileChange} />
-          {selectedFile && <p>Selected file: {selectedFile.name}</p>}
-          <button type="submit" disabled={!selectedFile}>Upload CSV</button>
+          <div style={{ marginBottom: '16px' }}>
+            <label htmlFor="model-select" style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              ElevenLabs Model:
+            </label>
+            <select
+              id="model-select"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              style={{
+                padding: '8px',
+                fontSize: '14px',
+                borderRadius: '4px',
+                border: '1px solid #ccc',
+                width: '300px'
+              }}
+              disabled={loadingModels}
+            >
+              {loadingModels ? (
+                <option>Loading models...</option>
+              ) : (
+                availableModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name} - {model.description}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          <div style={{ marginBottom: '16px' }}>
+            <input type="file" accept=".csv" onChange={handleFileChange} />
+            {selectedFile && <p>Selected file: {selectedFile.name}</p>}
+          </div>
+          <button type="submit" disabled={!selectedFile || loadingModels}>
+            Upload CSV
+          </button>
         </form>
         {uploadStatus && <p>{uploadStatus}</p>}
         {columns.length > 0 && (

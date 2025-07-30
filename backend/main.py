@@ -22,13 +22,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ELEVENLABS_API_KEY = "sk_b06c8ec344c2b671e4eb4dbf9067512dd1c9114713e6e254"
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "sk_b06c8ec344c2b671e4eb4dbf9067512dd1c9114713e6e254")
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
 # Store last processed summary for MVP
 last_processed_summary = []
 
-def generate_elevenlabs_audio(text, voice_id):
+def generate_elevenlabs_audio(text, voice_id, model_id="eleven_multilingual_v2"):
     url = ELEVENLABS_TTS_URL.format(voice_id=voice_id)
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
@@ -37,7 +37,7 @@ def generate_elevenlabs_audio(text, voice_id):
     }
     payload = {
         "text": text,
-        "model_id": "eleven_multilingual_v2",
+        "model_id": model_id,
         "voice_settings": {
             "stability": 0.5,
             "similarity_boost": 0.5
@@ -65,7 +65,7 @@ def generate_elevenlabs_audio(text, voice_id):
         print(f"Eleven Labs API error: {response.status_code} - {response.text}")
         return None
 
-def generate_elevenlabs_audio_with_speed(text, voice_id, speed_factor=1.0):
+def generate_elevenlabs_audio_with_speed(text, voice_id, speed_factor=1.0, model_id="eleven_multilingual_v2"):
     """Generate Eleven Labs audio with speed adjustment"""
     url = ELEVENLABS_TTS_URL.format(voice_id=voice_id)
     headers = {
@@ -75,7 +75,7 @@ def generate_elevenlabs_audio_with_speed(text, voice_id, speed_factor=1.0):
     }
     payload = {
         "text": text,
-        "model_id": "eleven_multilingual_v2",
+        "model_id": model_id,
         "voice_settings": {
             "stability": 0.5,
             "similarity_boost": 0.5
@@ -159,17 +159,17 @@ def adjust_audio_speed(audio_data, target_duration, original_duration):
         print(f"Error adjusting audio speed: {e}")
         return audio_data, 1.0
 
-def regenerate_audio_with_adjusted_speed(text, voice_id, expected_duration, max_attempts=3):
+def regenerate_audio_with_adjusted_speed(text, voice_id, expected_duration, max_attempts=3, model_id="eleven_multilingual_v2"):
     """Regenerate audio with speed adjustment to match expected duration"""
     print(f"  Regenerating audio with speed adjustment for target duration: {expected_duration:.2f}s")
     
     for attempt in range(max_attempts):
         if attempt == 0:
             # First attempt: try original speed
-            audio = generate_elevenlabs_audio(text, voice_id)
+            audio = generate_elevenlabs_audio(text, voice_id, model_id)
         else:
             # Subsequent attempts: adjust speed based on previous result
-            audio = generate_elevenlabs_audio_with_speed(text, voice_id, speed_factor)
+            audio = generate_elevenlabs_audio_with_speed(text, voice_id, speed_factor, model_id)
         
         if not audio:
             print(f"  Failed to generate audio on attempt {attempt + 1}")
@@ -212,7 +212,7 @@ def regenerate_audio_with_adjusted_speed(text, voice_id, expected_duration, max_
     return wav_data, actual_duration, speed_factor
 
 @app.post("/upload-csv/")
-async def upload_csv(file: UploadFile = File(...)):
+async def upload_csv(file: UploadFile = File(...), model_id: str = "eleven_multilingual_v2"):
     global last_processed_summary
     contents = await file.read()
     df = pd.read_csv(BytesIO(contents))
@@ -235,7 +235,7 @@ async def upload_csv(file: UploadFile = File(...)):
             
             # Use the new regeneration function that handles speed adjustment
             wav_data, actual_duration, final_speed_factor = regenerate_audio_with_adjusted_speed(
-                text, voice_id, expected_duration
+                text, voice_id, expected_duration, model_id=model_id
             )
             
             if wav_data:
@@ -485,6 +485,19 @@ def download_wavs():
         import traceback
         traceback.print_exc()
         return {"error": f"Failed to create zip file: {str(e)}"}
+
+@app.get("/models/")
+def get_available_models():
+    """Get list of available ElevenLabs models"""
+    models = [
+        {"id": "eleven_multilingual_v2", "name": "Eleven Multilingual v2", "description": "High quality multilingual model (29 languages)"},
+        {"id": "eleven_flash_v2_5", "name": "Eleven Flash v2.5", "description": "Fastest model with ultra-low latency (32 languages)"},
+        {"id": "eleven_turbo_v2_5", "name": "Eleven Turbo v2.5", "description": "Balanced quality and speed (32 languages)"},
+        {"id": "eleven_flash_v2", "name": "Eleven Flash v2", "description": "Fast English-only model"},
+        {"id": "eleven_turbo_v2", "name": "Eleven Turbo v2", "description": "Balanced English-only model"},
+        {"id": "eleven_monolingual_v1", "name": "Eleven English v1", "description": "Legacy English model"}
+    ]
+    return {"models": models}
 
 @app.get("/duration-analysis/")
 def get_duration_analysis():
