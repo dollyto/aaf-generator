@@ -302,6 +302,11 @@ def parse_timecode(tc):
                 return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
     return 0.0
 
+@app.get("/")
+def health_check():
+    """Simple health check endpoint"""
+    return {"status": "ok", "message": "AAF Generator Backend is running"}
+
 @app.get("/generate-aaf/")
 def generate_aaf():
     global last_processed_summary
