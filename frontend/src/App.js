@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 
 // Get API URL from environment variable or default to localhost
@@ -16,6 +16,67 @@ function App() {
   const [availableModels, setAvailableModels] = useState([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [apiKey, setApiKey] = useState('');
+  const [backendStatus, setBackendStatus] = useState('checking'); // 'online', 'offline', 'checking'
+
+  // Health check function
+  const checkBackendHealth = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000) // 5 second timeout
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'ok') {
+          setBackendStatus('online');
+          return true;
+        }
+      }
+      setBackendStatus('offline');
+      return false;
+    } catch (error) {
+      console.log('Backend health check failed:', error.message);
+      setBackendStatus('offline');
+      return false;
+    }
+  };
+
+  // Start health check on component mount
+  useEffect(() => {
+    // Initial health check
+    checkBackendHealth();
+
+    // Set up periodic health checks every 10 seconds
+    const interval = setInterval(checkBackendHealth, 10000);
+
+    // Cleanup on unmount
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, []);
+
+  // Load available models when backend comes online
+  useEffect(() => {
+    if (backendStatus === 'online' && availableModels.length === 0) {
+      const loadModels = async () => {
+        setLoadingModels(true);
+        try {
+          const response = await fetch(`${API_BASE_URL}/models/`);
+          if (response.ok) {
+            const data = await response.json();
+            setAvailableModels(data.models || []);
+          }
+        } catch (error) {
+          console.error('Failed to load models:', error);
+        }
+        setLoadingModels(false);
+      };
+      loadModels();
+    }
+  }, [backendStatus, availableModels.length]);
 
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
@@ -24,27 +85,16 @@ function App() {
     setSummary([]);
   };
 
-  // Load available models on component mount
-  React.useEffect(() => {
-    const loadModels = async () => {
-      setLoadingModels(true);
-      try {
-        const response = await fetch(`${API_BASE_URL}/models/`);
-        if (response.ok) {
-          const data = await response.json();
-          setAvailableModels(data.models || []);
-        }
-      } catch (error) {
-        console.error('Failed to load models:', error);
-      }
-      setLoadingModels(false);
-    };
-    loadModels();
-  }, []);
-
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!selectedFile || !apiKey) return;
+    
+    // Check if backend is online before proceeding
+    if (backendStatus !== 'online') {
+      setUploadStatus('Backend is offline. Please wait for it to come back online.');
+      return;
+    }
+    
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('api_key', apiKey);
@@ -60,7 +110,7 @@ function App() {
       setColumns(data.columns || []);
       setSummary(data.summary || []);
     } catch (error) {
-      setUploadStatus('Upload failed.');
+      setUploadStatus('Upload failed. Backend may be offline.');
     }
   };
 
@@ -95,6 +145,12 @@ function App() {
   };
 
   const handleDownloadAAF = async () => {
+    // Check if backend is online before proceeding
+    if (backendStatus !== 'online') {
+      alert('Backend is offline. Please wait for it to come back online.');
+      return;
+    }
+    
     setDownloadingAAF(true);
     try {
       const response = await fetch(`${API_BASE_URL}/generate-aaf/`, {
@@ -136,6 +192,12 @@ function App() {
   };
 
   const handleDownloadWAVs = async () => {
+    // Check if backend is online before proceeding
+    if (backendStatus !== 'online') {
+      alert('Backend is offline. Please wait for it to come back online.');
+      return;
+    }
+    
     setDownloadingWAVs(true);
     try {
       const response = await fetch(`${API_BASE_URL}/download-wavs/`, {
@@ -176,10 +238,88 @@ function App() {
     setDownloadingWAVs(false);
   };
 
+  // Loading overlay component
+  const LoadingOverlay = () => {
+    if (backendStatus === 'online') return null;
+    
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 9999,
+        color: 'white',
+        fontSize: '18px'
+      }}>
+        <div style={{
+          textAlign: 'center',
+          padding: '40px',
+          backgroundColor: 'rgba(0, 0, 0, 0.9)',
+          borderRadius: '10px',
+          border: '2px solid #007bff'
+        }}>
+          <div style={{
+            width: '50px',
+            height: '50px',
+            border: '5px solid #f3f3f3',
+            borderTop: '5px solid #007bff',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 20px'
+          }}></div>
+          <h2 style={{ marginBottom: '10px' }}>
+            {backendStatus === 'checking' ? 'Checking Backend Status...' : 'Backend Offline'}
+          </h2>
+          <p style={{ marginBottom: '20px', opacity: 0.8 }}>
+            {backendStatus === 'checking' 
+              ? 'Please wait while we connect to the server...' 
+              : 'The backend server is currently offline. Please wait while it starts up...'
+            }
+          </p>
+          <p style={{ fontSize: '14px', opacity: 0.6 }}>
+            This is normal behavior on Render.com free tier - the server wakes up when needed.
+          </p>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="App">
+      <LoadingOverlay />
       <header className="App-header">
         <h1>AAF Generator MVP</h1>
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          right: '20px',
+          padding: '8px 12px',
+          borderRadius: '20px',
+          fontSize: '12px',
+          fontWeight: 'bold',
+          backgroundColor: backendStatus === 'online' ? '#28a745' : backendStatus === 'checking' ? '#ffc107' : '#dc3545',
+          color: 'white',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px'
+        }}>
+          <div style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: 'white',
+            animation: backendStatus === 'checking' ? 'spin 1s linear infinite' : 'none'
+          }}></div>
+          {backendStatus === 'online' ? 'Backend Online' : 
+           backendStatus === 'checking' ? 'Checking...' : 'Backend Offline'}
+        </div>
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '16px' }}>
             <label htmlFor="model-select" style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
@@ -231,8 +371,8 @@ function App() {
               }}
             />
           </div>
-          <button type="submit" disabled={!selectedFile || loadingModels || !apiKey}>
-            Upload CSV
+          <button type="submit" disabled={!selectedFile || loadingModels || !apiKey || backendStatus !== 'online'}>
+            {backendStatus !== 'online' ? 'Backend Offline' : 'Upload CSV'}
           </button>
         </form>
         {uploadStatus && <p>{uploadStatus}</p>}
@@ -317,7 +457,7 @@ function App() {
         <div style={{ marginTop: '32px', display: 'flex', gap: '16px', justifyContent: 'center' }}>
           <button
             onClick={handleDownloadWAVs}
-            disabled={downloadingWAVs || summary.length === 0}
+            disabled={downloadingWAVs || summary.length === 0 || backendStatus !== 'online'}
             style={{
               padding: '12px 24px',
               fontSize: '16px',
@@ -325,15 +465,15 @@ function App() {
               color: 'white',
               border: 'none',
               borderRadius: '4px',
-              cursor: (downloadingWAVs || summary.length === 0) ? 'not-allowed' : 'pointer',
-              opacity: (downloadingWAVs || summary.length === 0) ? 0.7 : 1
+              cursor: (downloadingWAVs || summary.length === 0 || backendStatus !== 'online') ? 'not-allowed' : 'pointer',
+              opacity: (downloadingWAVs || summary.length === 0 || backendStatus !== 'online') ? 0.7 : 1
             }}
           >
-            {downloadingWAVs ? 'Creating ZIP...' : 'Download WAV Files (ZIP)'}
+            {downloadingWAVs ? 'Creating ZIP...' : backendStatus !== 'online' ? 'Backend Offline' : 'Download WAV Files (ZIP)'}
           </button>
           <button
             onClick={handleDownloadAAF}
-            disabled={downloadingAAF || summary.length === 0}
+            disabled={downloadingAAF || summary.length === 0 || backendStatus !== 'online'}
             style={{
               padding: '12px 24px',
               fontSize: '16px',
@@ -341,11 +481,11 @@ function App() {
               color: 'white',
               border: 'none',
               borderRadius: '4px',
-              cursor: (downloadingAAF || summary.length === 0) ? 'not-allowed' : 'pointer',
-              opacity: (downloadingAAF || summary.length === 0) ? 0.7 : 1
+              cursor: (downloadingAAF || summary.length === 0 || backendStatus !== 'online') ? 'not-allowed' : 'pointer',
+              opacity: (downloadingAAF || summary.length === 0 || backendStatus !== 'online') ? 0.7 : 1
             }}
           >
-            {downloadingAAF ? 'Generating AAF...' : 'Download AAF'}
+            {downloadingAAF ? 'Generating AAF...' : backendStatus !== 'online' ? 'Backend Offline' : 'Download AAF'}
           </button>
         </div>
       </header>
