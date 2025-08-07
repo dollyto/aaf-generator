@@ -228,7 +228,13 @@ async def upload_csv(
     df = pd.read_csv(BytesIO(contents))
     processed = []
     for idx, row in df.iterrows():
-        text = str(row.get("translation", ""))
+        # Try to get translation first, fall back to transcription if translation is missing or empty
+        translation = str(row.get("translation", "")).strip()
+        transcription = str(row.get("transcription", "")).strip()
+        
+        # Use translation if available, otherwise fall back to transcription
+        text = translation if translation else transcription
+        
         voice_id = str(row.get("Voice ID", ""))
         start_time = str(row.get("start_time", ""))
         end_time = str(row.get("end_time", ""))
@@ -280,11 +286,15 @@ async def upload_csv(
                     "failed": True
                 })
                 audio_alternatives.append("")  # Empty string for failed generation
+        # Determine which column was used
+        used_column = "translation" if translation else "transcription"
+        
         processed.append({
             "start_time": start_time,
             "end_time": end_time,
             "voice_id": voice_id,
             "text": text,
+            "used_column": used_column,
             "num_audio_alternatives": len(audio_alternatives),
             "audio_alternatives": audio_alternatives,
             "duration_analysis": duration_analysis

@@ -4,7 +4,8 @@ A web application for generating AAF (Advanced Authoring Format) files with audi
 
 ## Features
 
-- Upload CSV files with translation data
+- Upload CSV files with translation or transcription data
+- Automatic fallback from translation to transcription column when translation is missing or empty
 - Generate audio using ElevenLabs API
 - Create AAF files with synchronized audio
 - Download generated audio files
@@ -108,9 +109,21 @@ web: uvicorn main:app --host 0.0.0.0 --port $PORT
 - `ELEVENLABS_API_KEY`: Your ElevenLabs API key (required)
 - `REACT_APP_API_URL`: Backend API URL (for frontend deployment)
 
+## CSV Format
+
+The application expects a CSV file with the following columns:
+
+- `start_time`: Start time in format `HH:MM:SS` or `HH:MM:SS.000`
+- `end_time`: End time in format `HH:MM:SS` or `HH:MM:SS.000`
+- `Voice ID`: ElevenLabs voice ID for text-to-speech
+- `translation`: Translated text (preferred, will be used if available)
+- `transcription`: Original transcription text (fallback when translation is missing or empty)
+
+**Note**: The app will automatically use the `translation` column if it contains text, otherwise it will fall back to the `transcription` column. This allows for flexible CSV formats where either column can be used.
+
 ## API Endpoints
 
-- `POST /upload-csv/`: Upload CSV file with translation data
+- `POST /upload-csv/`: Upload CSV file with translation/transcription data
 - `GET /generate-aaf/`: Generate AAF file
 - `GET /download-wavs/`: Download generated audio files
 - `GET /models/`: Get available ElevenLabs models

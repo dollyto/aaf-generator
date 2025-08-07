@@ -352,6 +352,9 @@ function App() {
           <div style={{ marginBottom: '16px' }}>
             <input type="file" accept=".csv" onChange={handleFileChange} />
             {selectedFile && <p>Selected file: {selectedFile.name}</p>}
+            <p style={{ fontSize: '12px', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>
+              Note: The app will use the "translation" column if available, otherwise it will fall back to the "transcription" column.
+            </p>
           </div>
           <div style={{ marginBottom: '16px' }}>
             <label htmlFor="api-key" style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
@@ -396,7 +399,7 @@ function App() {
                   <th style={{ border: '1px solid #ccc', padding: '4px' }}>Start Time</th>
                   <th style={{ border: '1px solid #ccc', padding: '4px' }}>End Time</th>
                   <th style={{ border: '1px solid #ccc', padding: '4px' }}>Voice ID</th>
-                  <th style={{ border: '1px solid #ccc', padding: '4px' }}>Translation</th>
+                  <th style={{ border: '1px solid #ccc', padding: '4px' }}>Text (Source)</th>
                   <th style={{ border: '1px solid #ccc', padding: '4px' }}># Alternatives</th>
                   <th style={{ border: '1px solid #ccc', padding: '4px' }}>Audio Playback</th>
                 </tr>
@@ -408,7 +411,14 @@ function App() {
                     <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.start_time}</td>
                     <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.end_time}</td>
                     <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.voice_id}</td>
-                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.text}</td>
+                    <td style={{ border: '1px solid #ccc', padding: '4px' }}>
+                      {line.text}
+                      {line.used_column && (
+                        <div style={{ fontSize: '10px', color: '#666', fontStyle: 'italic' }}>
+                          (from {line.used_column})
+                        </div>
+                      )}
+                    </td>
                     <td style={{ border: '1px solid #ccc', padding: '4px' }}>{line.num_audio_alternatives}</td>
                     <td style={{ border: '1px solid #ccc', padding: '4px' }}>
                       {line.audio_alternatives && line.audio_alternatives.map((audioBase64, altIdx) => (

@@ -62,7 +62,7 @@ After backend deploys, update the frontend environment variable:
 ## 🧪 Testing
 
 1. Share the frontend URL with your team
-2. Upload a CSV file with translation data
+2. Upload a CSV file with translation or transcription data
 3. Test the AAF generation process
 4. Download generated files
 
