@@ -17,6 +17,7 @@ function App() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [backendStatus, setBackendStatus] = useState('checking'); // 'online', 'offline', 'checking'
+  const [processingStatus, setProcessingStatus] = useState({ is_processing: false, duration: 0, message: '' });
 
   // Health check function
   const checkBackendHealth = async () => {
@@ -30,14 +31,33 @@ function App() {
         const data = await response.json();
         if (data.status === 'ok') {
           setBackendStatus('online');
+          
+          // Also check processing status
+          try {
+            const processingResponse = await fetch(`${API_BASE_URL}/processing-status/`, {
+              method: 'GET',
+              signal: AbortSignal.timeout(3000) // 3 second timeout for processing status
+            });
+            
+            if (processingResponse.ok) {
+              const processingData = await processingResponse.json();
+              setProcessingStatus(processingData);
+            }
+          } catch (processingError) {
+            console.log('Processing status check failed:', processingError.message);
+            // Don't change processing status on error, keep the last known state
+          }
+          
           return true;
         }
       }
       setBackendStatus('offline');
+      setProcessingStatus({ is_processing: false, duration: 0, message: '' });
       return false;
     } catch (error) {
       console.log('Backend health check failed:', error.message);
       setBackendStatus('offline');
+      setProcessingStatus({ is_processing: false, duration: 0, message: '' });
       return false;
     }
   };
@@ -95,6 +115,12 @@ function App() {
       return;
     }
     
+    // Check if backend is already processing
+    if (processingStatus.is_processing) {
+      setUploadStatus('Backend is currently processing another file. Please wait for it to complete.');
+      return;
+    }
+    
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('api_key', apiKey);
@@ -106,9 +132,17 @@ function App() {
         body: formData,
       });
       const data = await response.json();
-      setUploadStatus(data.message);
-      setColumns(data.columns || []);
-      setSummary(data.summary || []);
+      
+      // Check if there's an error in the response
+      if (data.error) {
+        setUploadStatus(`Error: ${data.error}`);
+        setColumns([]);
+        setSummary([]);
+      } else {
+        setUploadStatus(data.message);
+        setColumns(data.columns || []);
+        setSummary(data.summary || []);
+      }
     } catch (error) {
       setUploadStatus('Upload failed. Backend may be offline.');
     }
@@ -148,6 +182,12 @@ function App() {
     // Check if backend is online before proceeding
     if (backendStatus !== 'online') {
       alert('Backend is offline. Please wait for it to come back online.');
+      return;
+    }
+    
+    // Check if backend is processing
+    if (processingStatus.is_processing) {
+      alert('Backend is currently processing a file. Please wait for it to complete.');
       return;
     }
     
@@ -198,6 +238,12 @@ function App() {
       return;
     }
     
+    // Check if backend is processing
+    if (processingStatus.is_processing) {
+      alert('Backend is currently processing a file. Please wait for it to complete.');
+      return;
+    }
+    
     setDownloadingWAVs(true);
     try {
       const response = await fetch(`${API_BASE_URL}/download-wavs/`, {
@@ -240,7 +286,7 @@ function App() {
 
   // Loading overlay component
   const LoadingOverlay = () => {
-    if (backendStatus === 'online') return null;
+    if (backendStatus === 'online' && !processingStatus.is_processing) return null;
     
     return (
       <div style={{
@@ -275,17 +321,22 @@ function App() {
             margin: '0 auto 20px'
           }}></div>
           <h2 style={{ marginBottom: '10px' }}>
-            {backendStatus === 'checking' ? 'Checking Backend Status...' : 'Backend Offline'}
+            {processingStatus.is_processing ? 'Processing File...' : 
+             backendStatus === 'checking' ? 'Checking Backend Status...' : 'Backend Offline'}
           </h2>
           <p style={{ marginBottom: '20px', opacity: 0.8 }}>
-            {backendStatus === 'checking' 
-              ? 'Please wait while we connect to the server...' 
-              : 'The backend server is currently offline. Please wait while it starts up...'
+            {processingStatus.is_processing 
+              ? processingStatus.message
+              : backendStatus === 'checking' 
+                ? 'Please wait while we connect to the server...' 
+                : 'The backend server is currently offline. Please wait while it starts up...'
             }
           </p>
-          <p style={{ fontSize: '14px', opacity: 0.6 }}>
-            This is normal behavior on Render.com free tier - the server wakes up when needed.
-          </p>
+          {!processingStatus.is_processing && (
+            <p style={{ fontSize: '14px', opacity: 0.6 }}>
+              This is normal behavior on Render.com free tier - the server wakes up when needed.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -304,7 +355,9 @@ function App() {
           borderRadius: '20px',
           fontSize: '12px',
           fontWeight: 'bold',
-          backgroundColor: backendStatus === 'online' ? '#28a745' : backendStatus === 'checking' ? '#ffc107' : '#dc3545',
+          backgroundColor: processingStatus.is_processing ? '#ffc107' : 
+                          backendStatus === 'online' ? '#28a745' : 
+                          backendStatus === 'checking' ? '#ffc107' : '#dc3545',
           color: 'white',
           display: 'flex',
           alignItems: 'center',
@@ -315,9 +368,10 @@ function App() {
             height: '8px',
             borderRadius: '50%',
             backgroundColor: 'white',
-            animation: backendStatus === 'checking' ? 'spin 1s linear infinite' : 'none'
+            animation: (backendStatus === 'checking' || processingStatus.is_processing) ? 'spin 1s linear infinite' : 'none'
           }}></div>
-          {backendStatus === 'online' ? 'Backend Online' : 
+          {processingStatus.is_processing ? `Processing (${processingStatus.duration}s)` :
+           backendStatus === 'online' ? 'Backend Online' : 
            backendStatus === 'checking' ? 'Checking...' : 'Backend Offline'}
         </div>
         <form onSubmit={handleSubmit}>
@@ -353,7 +407,7 @@ function App() {
             <input type="file" accept=".csv" onChange={handleFileChange} />
             {selectedFile && <p>Selected file: {selectedFile.name}</p>}
             <p style={{ fontSize: '12px', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>
-              Note: The app will use the "translation" column if available, otherwise it will fall back to the "transcription" column.
+              Required columns: start_time, end_time, voice_id, and either translation or transcription.
             </p>
           </div>
           <div style={{ marginBottom: '16px' }}>
@@ -374,8 +428,9 @@ function App() {
               }}
             />
           </div>
-          <button type="submit" disabled={!selectedFile || loadingModels || !apiKey || backendStatus !== 'online'}>
-            {backendStatus !== 'online' ? 'Backend Offline' : 'Upload CSV'}
+          <button type="submit" disabled={!selectedFile || loadingModels || !apiKey || backendStatus !== 'online' || processingStatus.is_processing}>
+            {processingStatus.is_processing ? 'Processing...' :
+             backendStatus !== 'online' ? 'Backend Offline' : 'Upload CSV'}
           </button>
         </form>
         {uploadStatus && <p>{uploadStatus}</p>}
@@ -467,7 +522,7 @@ function App() {
         <div style={{ marginTop: '32px', display: 'flex', gap: '16px', justifyContent: 'center' }}>
           <button
             onClick={handleDownloadWAVs}
-            disabled={downloadingWAVs || summary.length === 0 || backendStatus !== 'online'}
+            disabled={downloadingWAVs || summary.length === 0 || backendStatus !== 'online' || processingStatus.is_processing}
             style={{
               padding: '12px 24px',
               fontSize: '16px',
@@ -475,15 +530,17 @@ function App() {
               color: 'white',
               border: 'none',
               borderRadius: '4px',
-              cursor: (downloadingWAVs || summary.length === 0 || backendStatus !== 'online') ? 'not-allowed' : 'pointer',
-              opacity: (downloadingWAVs || summary.length === 0 || backendStatus !== 'online') ? 0.7 : 1
+              cursor: (downloadingWAVs || summary.length === 0 || backendStatus !== 'online' || processingStatus.is_processing) ? 'not-allowed' : 'pointer',
+              opacity: (downloadingWAVs || summary.length === 0 || backendStatus !== 'online' || processingStatus.is_processing) ? 0.7 : 1
             }}
           >
-            {downloadingWAVs ? 'Creating ZIP...' : backendStatus !== 'online' ? 'Backend Offline' : 'Download WAV Files (ZIP)'}
+            {downloadingWAVs ? 'Creating ZIP...' : 
+             processingStatus.is_processing ? 'Processing...' :
+             backendStatus !== 'online' ? 'Backend Offline' : 'Download WAV Files (ZIP)'}
           </button>
           <button
             onClick={handleDownloadAAF}
-            disabled={downloadingAAF || summary.length === 0 || backendStatus !== 'online'}
+            disabled={downloadingAAF || summary.length === 0 || backendStatus !== 'online' || processingStatus.is_processing}
             style={{
               padding: '12px 24px',
               fontSize: '16px',
@@ -491,11 +548,13 @@ function App() {
               color: 'white',
               border: 'none',
               borderRadius: '4px',
-              cursor: (downloadingAAF || summary.length === 0 || backendStatus !== 'online') ? 'not-allowed' : 'pointer',
-              opacity: (downloadingAAF || summary.length === 0 || backendStatus !== 'online') ? 0.7 : 1
+              cursor: (downloadingAAF || summary.length === 0 || backendStatus !== 'online' || processingStatus.is_processing) ? 'not-allowed' : 'pointer',
+              opacity: (downloadingAAF || summary.length === 0 || backendStatus !== 'online' || processingStatus.is_processing) ? 0.7 : 1
             }}
           >
-            {downloadingAAF ? 'Generating AAF...' : backendStatus !== 'online' ? 'Backend Offline' : 'Download AAF'}
+            {downloadingAAF ? 'Generating AAF...' : 
+             processingStatus.is_processing ? 'Processing...' :
+             backendStatus !== 'online' ? 'Backend Offline' : 'Download AAF'}
           </button>
         </div>
       </header>

@@ -10,6 +10,7 @@ import aaf2
 import wave
 import struct
 import zipfile
+import time
 
 app = FastAPI()
 
@@ -26,6 +27,10 @@ ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
 # Store last processed summary for MVP
 last_processed_summary = []
+
+# Track processing status
+is_processing = False
+processing_start_time = None
 
 def generate_elevenlabs_audio(text, voice_id, api_key, model_id="eleven_multilingual_v2"):
     url = ELEVENLABS_TTS_URL.format(voice_id=voice_id)
@@ -190,12 +195,11 @@ def regenerate_audio_with_adjusted_speed(text, voice_id, api_key, expected_durat
             continue
         
         duration_diff = actual_duration - expected_duration
-        duration_percent = (duration_diff / expected_duration) * 100
         
-        print(f"  Attempt {attempt + 1}: Expected={expected_duration:.2f}s, Actual={actual_duration:.2f}s, Diff={duration_diff:+.2f}s ({duration_percent:+.1f}%)")
+        print(f"  Attempt {attempt + 1}: Expected={expected_duration:.2f}s, Actual={actual_duration:.2f}s, Diff={duration_diff:+.2f}s")
         
-        # Check if duration is acceptable (within 10%)
-        if abs(duration_percent) <= 10:
+        # Check if duration is acceptable (within 0.25s)
+        if abs(duration_diff) <= 0.25:
             print(f"  ✓ Duration within acceptable range after {attempt + 1} attempts")
             return wav_data, actual_duration, 1.0 if attempt == 0 else speed_factor
         
@@ -216,93 +220,144 @@ async def upload_csv(
     api_key: str = Form(...),
     model_id: str = "eleven_multilingual_v2"
 ):
-    global last_processed_summary
+    global last_processed_summary, is_processing, processing_start_time
     
     # Validate API key
     if not api_key or api_key.strip() == "":
         return {"error": "ElevenLabs API key is required"}
     
-    contents = await file.read()
-    df = pd.read_csv(BytesIO(contents))
-    processed = []
-    for idx, row in df.iterrows():
-        # Try to get translation first, fall back to transcription if translation is missing or empty
-        translation = str(row.get("translation", "")).strip()
-        transcription = str(row.get("transcription", "")).strip()
+    # Set processing status to True
+    is_processing = True
+    processing_start_time = time.time()
+    
+    try:
+        contents = await file.read()
+        df = pd.read_csv(BytesIO(contents))
         
-        # Use translation if available, otherwise fall back to transcription
-        text = translation if translation else transcription
+        # Debug: Print available columns
+        print(f"CSV columns: {list(df.columns)}")
+        print(f"First few rows:")
+        print(df.head())
         
-        voice_id = str(row.get("Voice ID", ""))
-        start_time = str(row.get("start_time", ""))
-        end_time = str(row.get("end_time", ""))
-        if not text or not voice_id:
-            continue
-        audio_alternatives = []
-        duration_analysis = []
+        # Check for required columns
+        required_columns = {
+            'start_time': ['start_time'],
+            'end_time': ['end_time'], 
+            'voice_id': ['voice_id'],
+            'text': ['translation', 'transcription']  # At least one of these
+        }
         
-        # Calculate expected duration from timecodes
-        expected_duration = parse_timecode(end_time) - parse_timecode(start_time)
+        missing_columns = []
+        available_columns = list(df.columns)
         
-        for i in range(3):
-            print(f"Generating audio for line {idx}, alternative {i}")
+        # Check each required column type
+        for column_type, possible_names in required_columns.items():
+            found = False
+            for name in possible_names:
+                if name in available_columns:
+                    found = True
+                    break
+            if not found:
+                missing_columns.append(f"{column_type} (expected: {', '.join(possible_names)})")
+        
+        if missing_columns:
+            error_message = f"Missing required columns: {', '.join(missing_columns)}. Available columns: {', '.join(available_columns)}"
+            print(f"CSV validation error: {error_message}")
+            is_processing = False  # Reset processing status on error
+            return {"error": error_message}
+        
+        processed = []
+        for idx, row in df.iterrows():
+            # Get text from translation or transcription column
+            translation = str(row.get("translation", "")).strip()
+            transcription = str(row.get("transcription", "")).strip()
             
-            # Use the new regeneration function that handles speed adjustment
-            wav_data, actual_duration, final_speed_factor = regenerate_audio_with_adjusted_speed(
-                text, voice_id, api_key, expected_duration, model_id=model_id
-            )
+            # Use translation if available, otherwise fall back to transcription
+            text = translation if translation else transcription
             
-            if wav_data:
-                duration_diff = actual_duration - expected_duration
-                duration_percent = (duration_diff / expected_duration) * 100
+            # Get required columns (we already validated they exist)
+            voice_id = str(row.get("voice_id", ""))
+            start_time = str(row.get("start_time", ""))
+            end_time = str(row.get("end_time", ""))
+            
+            if not text or not voice_id:
+                print(f"Skipping row {idx}: missing text or voice_id. text='{text}', voice_id='{voice_id}'")
+                continue
+            audio_alternatives = []
+            duration_analysis = []
+            
+            # Calculate expected duration from timecodes
+            expected_duration = parse_timecode(end_time) - parse_timecode(start_time)
+            
+            for i in range(3):
+                print(f"Generating audio for line {idx}, alternative {i}")
                 
-                print(f"Line {idx}, Alt {i}: Expected={expected_duration:.2f}s, Actual={actual_duration:.2f}s, Diff={duration_diff:+.2f}s ({duration_percent:+.1f}%)")
+                # Use the new regeneration function that handles speed adjustment
+                wav_data, actual_duration, final_speed_factor = regenerate_audio_with_adjusted_speed(
+                    text, voice_id, api_key, expected_duration, model_id=model_id
+                )
                 
-                duration_analysis.append({
-                    "alternative": i,
-                    "expected_duration": expected_duration,
-                    "actual_duration": actual_duration,
-                    "difference": duration_diff,
-                    "percent_difference": duration_percent,
-                    "speed_factor": final_speed_factor,
-                    "regenerated": final_speed_factor != 1.0
-                })
-                
-                audio_b64 = base64.b64encode(wav_data).decode('utf-8')
-                audio_alternatives.append(audio_b64)
-            else:
-                print(f"Failed to generate audio for line {idx}, alternative {i}")
-                # Add placeholder for failed generation
-                duration_analysis.append({
-                    "alternative": i,
-                    "expected_duration": expected_duration,
-                    "actual_duration": 0.0,
-                    "difference": -expected_duration,
-                    "percent_difference": -100.0,
-                    "speed_factor": 1.0,
-                    "regenerated": False,
-                    "failed": True
-                })
-                audio_alternatives.append("")  # Empty string for failed generation
-        # Determine which column was used
-        used_column = "translation" if translation else "transcription"
+                if wav_data:
+                    duration_diff = actual_duration - expected_duration
+                    
+                    print(f"Line {idx}, Alt {i}: Expected={expected_duration:.2f}s, Actual={actual_duration:.2f}s, Diff={duration_diff:+.2f}s")
+                    
+                    duration_analysis.append({
+                        "alternative": i,
+                        "expected_duration": expected_duration,
+                        "actual_duration": actual_duration,
+                        "difference": duration_diff,
+                        "percent_difference": (duration_diff / expected_duration) * 100,  # Keep for backward compatibility
+                        "speed_factor": final_speed_factor,
+                        "regenerated": final_speed_factor != 1.0
+                    })
+                    
+                    audio_b64 = base64.b64encode(wav_data).decode('utf-8')
+                    audio_alternatives.append(audio_b64)
+                else:
+                    print(f"Failed to generate audio for line {idx}, alternative {i}")
+                    # Add placeholder for failed generation
+                    duration_analysis.append({
+                        "alternative": i,
+                        "expected_duration": expected_duration,
+                        "actual_duration": 0.0,
+                        "difference": -expected_duration,
+                        "percent_difference": -100.0,
+                        "speed_factor": 1.0,
+                        "regenerated": False,
+                        "failed": True
+                    })
+                    audio_alternatives.append("")  # Empty string for failed generation
+            # Determine which column was used
+            used_column = "translation" if translation else "transcription"
+            
+            processed.append({
+                "start_time": start_time,
+                "end_time": end_time,
+                "voice_id": voice_id,
+                "text": text,
+                "used_column": used_column,
+                "num_audio_alternatives": len(audio_alternatives),
+                "audio_alternatives": audio_alternatives,
+                "duration_analysis": duration_analysis
+            })
+        last_processed_summary = processed
         
-        processed.append({
-            "start_time": start_time,
-            "end_time": end_time,
-            "voice_id": voice_id,
-            "text": text,
-            "used_column": used_column,
-            "num_audio_alternatives": len(audio_alternatives),
-            "audio_alternatives": audio_alternatives,
-            "duration_analysis": duration_analysis
-        })
-    last_processed_summary = processed
-    return {
-        "message": f"Processed {len(processed)} lines.",
-        "lines": len(processed),
-        "summary": processed  # Include all data including audio_alternatives
-    }
+        # Set processing status to False when complete
+        is_processing = False
+        
+        return {
+            "message": f"Processed {len(processed)} lines.",
+            "lines": len(processed),
+            "summary": processed  # Include all data including audio_alternatives
+        }
+    except Exception as e:
+        # Reset processing status on any error
+        is_processing = False
+        print(f"Error processing CSV: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Failed to process CSV: {str(e)}"}
 
 def parse_timecode(tc):
     # Supports hh:mm:ss:ff or hh:mm:ss.000
@@ -324,6 +379,26 @@ def parse_timecode(tc):
 def health_check():
     """Simple health check endpoint"""
     return {"status": "ok", "message": "AAF Generator Backend is running"}
+
+@app.get("/processing-status/")
+def get_processing_status():
+    """Check if the backend is currently processing a file"""
+    global is_processing, processing_start_time
+    
+    if is_processing and processing_start_time:
+        import time
+        processing_duration = time.time() - processing_start_time
+        return {
+            "is_processing": True,
+            "processing_duration": round(processing_duration, 1),
+            "message": f"Processing file for {round(processing_duration, 1)} seconds..."
+        }
+    else:
+        return {
+            "is_processing": False,
+            "processing_duration": 0,
+            "message": "Backend is idle"
+        }
 
 @app.get("/generate-aaf/")
 def generate_aaf():
@@ -531,6 +606,7 @@ def get_duration_analysis():
     analysis_summary = []
     total_alternatives = 0
     adjusted_alternatives = 0
+    within_tolerance_count = 0
     
     for idx, item in enumerate(last_processed_summary):
         if "duration_analysis" in item:
@@ -538,6 +614,11 @@ def get_duration_analysis():
                 total_alternatives += 1
                 if alt_analysis.get("speed_factor", 1.0) != 1.0:
                     adjusted_alternatives += 1
+                if abs(alt_analysis["difference"]) <= 0.25:
+                    within_tolerance_count += 1
+                
+                # Check if duration is within 0.25s tolerance
+                within_tolerance = abs(alt_analysis["difference"]) <= 0.25
                 
                 analysis_summary.append({
                     "line": idx + 1,
@@ -547,6 +628,7 @@ def get_duration_analysis():
                     "actual_duration": round(alt_analysis["actual_duration"], 2),
                     "difference": round(alt_analysis["difference"], 2),
                     "percent_difference": round(alt_analysis["percent_difference"], 1),
+                    "within_tolerance": within_tolerance,
                     "speed_factor": round(alt_analysis.get("speed_factor", 1.0), 3),
                     "regenerated": alt_analysis.get("regenerated", False),
                     "failed": alt_analysis.get("failed", False)
@@ -556,7 +638,10 @@ def get_duration_analysis():
         "summary": {
             "total_alternatives": total_alternatives,
             "adjusted_alternatives": adjusted_alternatives,
-            "adjustment_percentage": round((adjusted_alternatives / total_alternatives * 100) if total_alternatives > 0 else 0, 1)
+            "adjustment_percentage": round((adjusted_alternatives / total_alternatives * 100) if total_alternatives > 0 else 0, 1),
+            "within_tolerance_count": within_tolerance_count,
+            "within_tolerance_percentage": round((within_tolerance_count / total_alternatives * 100) if total_alternatives > 0 else 0, 1),
+            "tolerance_threshold": 0.25
         },
         "details": analysis_summary
     }
