@@ -22,8 +22,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Remove the environment variable dependency
-# ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "sk_b06c8ec344c2b671e4eb4dbf9067512dd1c9114713e6e254")
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
 # Store last processed summary for MVP
